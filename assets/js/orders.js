@@ -1,0 +1,229 @@
+// JS cho trang Đơn hàng của tôi
+
+// Khai báo sẵn hàm showNotification nếu chưa có ở file khác
+window.showNotification = window.showNotification || function(msg, type) {
+    alert((type === 'error' ? 'Lỗi: ' : 'Thông báo: ') + msg);
+};
+
+document.addEventListener('DOMContentLoaded', async () => {
+    const ordersNavLinks = document.querySelectorAll('.orders-nav a');
+    let orders = [];
+    
+    // Lấy các phần tử modal và các control bên trong
+    const cancelModal = document.getElementById('cancel-modal');
+    const cancelOrderIdDisplay = document.getElementById('cancel-order-id-display');
+    const cancelReasonRadios = () => document.querySelectorAll('.cancel-options input[name="cancel-reason"]');
+    const cancelOtherInput = document.getElementById('cancel-other-input');
+    const cancelConfirmBtn = document.getElementById('cancel-confirm-btn');
+    const cancelCancelBtn = document.getElementById('cancel-cancel-btn');
+    let currentCancelOrderId = null;
+
+    // Chuyển trạng thái ngắn thành tiếng Việt
+    function getStatusText(status) {
+        switch(status) {
+            case 'Pending': return 'Chờ xác nhận';
+            case 'Processing': return 'Đang xử lý';
+            case 'Shipping': return 'Đang vận chuyển';
+            case 'Completed': return 'Thành công';
+            case 'Cancelled': return 'Đã hủy';
+            default: return status;
+        }
+    }
+
+    // Hàm hiển thị đơn hàng theo trạng thái
+    function renderOrders(status) {
+        const container = document.getElementById('orders-list');
+        if (!container) return; // Tránh lỗi nếu không tìm thấy DOM
+        
+        container.innerHTML = '';
+        
+        // Lọc đơn hàng theo trạng thái
+        let filtered = orders;
+        if (status && status !== 'all' && status !== 'All') {
+            filtered = orders.filter(o => o.status === status);
+        }
+        
+        if (!filtered || filtered.length === 0) {
+            container.innerHTML = '<p>Không có đơn hàng.</p>';
+            return;
+        }
+        
+        filtered.forEach(order => {
+            const firstName = order.first_product_name || 'Đơn hàng';
+            const itemsCount = order.items_count ? Number(order.items_count) : null;
+            const moreItemsText = itemsCount && itemsCount > 1 ? ` +${itemsCount - 1} sản phẩm khác` : '';
+            const imageHtml = order.first_product_image 
+                ? `<div class="order-thumb"><img src="assets/images/${order.first_product_image}" alt="${firstName}"></div>`
+                : '';
+            
+            const div = document.createElement('div');
+            div.className = 'order-card';
+            const statusText = getStatusText(order.status);
+            
+            // Nếu trạng thái chưa hoàn thành và chưa hủy thì tạo nút hủy
+            let cancelBtnHtml = '';
+            if (order.status !== 'Completed' && order.status !== 'Cancelled') {
+                cancelBtnHtml = `<button class="cancel-order" data-id="${order.id}">Hủy đơn</button>`;
+            }
+            
+            // Đã sửa: Xóa dấu / ở href order_detail.php
+            div.innerHTML = `
+                ${imageHtml}
+                <div class="order-main">
+                    <p class="order-title">${firstName}${moreItemsText}</p>
+                    <p class="order-meta">Mã đơn: <a href="order_detail.php?id=${order.id}">#${order.id}</a> · ${order.created_at}</p>
+                    <p class="order-status-text">Trạng thái: ${statusText}</p>
+                    <p class="order-total">Tổng: ${Number(order.final_total).toLocaleString()}₫</p>
+                    ${cancelBtnHtml}
+                </div>
+            `;
+            
+            // Khi click vào thẻ đơn hàng, điều hướng tới trang chi tiết
+            div.addEventListener('click', function(e) {
+                if (e.target && (e.target.classList && e.target.classList.contains('cancel-order'))) return;
+                if (e.target && e.target.tagName && e.target.tagName.toLowerCase() === 'a') return;
+                // Đã sửa: Xóa dấu / ở đường dẫn
+                window.location.href = `order_detail.php?id=${order.id}`;
+            });
+            
+            container.appendChild(div);
+        });
+
+        // Gắn sự kiện cho các nút hủy đơn (làm mới mỗi lần render)
+        container.querySelectorAll('.cancel-order').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation(); // Ngăn sự kiện click truyền lên thẻ cha
+                const orderId = this.getAttribute('data-id');
+                currentCancelOrderId = parseInt(orderId);
+                if (cancelOrderIdDisplay) cancelOrderIdDisplay.textContent = orderId;
+                
+                // Reset form hủy
+                cancelReasonRadios().forEach(r => r.checked = false);
+                if (cancelOtherInput) {
+                    cancelOtherInput.value = '';
+                    cancelOtherInput.style.display = 'none';
+                }
+                if (cancelModal) cancelModal.classList.remove('hidden');
+            });
+        });
+    }
+
+    // Tải danh sách đơn hàng từ server (SỬA LẠI LUỒNG CHẠY Ở ĐÂY)
+    async function fetchAndRenderOrders() {
+        try {
+            // Đã sửa: Xóa dấu / ở đầu url api
+            const res = await fetch('api/get_order_history.php', { credentials: 'same-origin' });
+            
+            // Bắt lỗi nếu server trả về text thay vì JSON (ví dụ lỗi PHP)
+            const contentType = res.headers.get("content-type");
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+                orders = await res.json();
+            } else {
+                const textError = await res.text();
+                console.error("Lỗi từ server (không phải JSON):", textError);
+                orders = [];
+            }
+            
+            // CHỈ GỌI renderOrders SAU KHI ĐÃ CÓ DỮ LIỆU
+            const activeTab = document.querySelector('.orders-nav .active');
+            const status = activeTab ? activeTab.getAttribute('data-status') : 'all';
+            renderOrders(status);
+            
+        } catch (err) {
+            console.error("Lỗi fetch đơn hàng:", err);
+            renderOrders('all'); // Render mảng rỗng để báo lỗi
+        }
+    }
+
+    // Lắng nghe sự thay đổi trên radio lý do hủy
+    document.addEventListener('change', function(e) {
+        if (e.target && e.target.matches('.cancel-options input[name="cancel-reason"]')) {
+            if (cancelOtherInput) {
+                if (e.target.value === 'Khác') {
+                    cancelOtherInput.style.display = 'block';
+                } else {
+                    cancelOtherInput.style.display = 'none';
+                    cancelOtherInput.value = '';
+                }
+            }
+        }
+    });
+
+    // Nút xác nhận hủy
+    if (cancelConfirmBtn) {
+        cancelConfirmBtn.addEventListener('click', async () => {
+            if (!currentCancelOrderId) return;
+            
+            const radios = cancelReasonRadios();
+            const selected = Array.from(radios).find(r => r.checked);
+            
+            if (!selected) {
+                showNotification('Vui lòng chọn lý do hủy!', 'error');
+                return;
+            }
+            
+            let reason = selected.value;
+            if (reason === 'Khác') {
+                reason = cancelOtherInput ? cancelOtherInput.value.trim() : '';
+                if (!reason) {
+                    showNotification('Vui lòng nhập lý do khác!', 'error');
+                    return;
+                }
+            }
+            
+            try {
+                // Đã sửa: Xóa dấu / ở đầu url api
+                const res = await fetch('api/cancel_order.php', { 
+                    credentials: 'same-origin',
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ order_id: currentCancelOrderId, reason })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    showNotification(data.message || 'Đơn hàng đã được hủy.', 'success');
+                    // Cập nhật trạng thái trong mảng orders
+                    orders = orders.map(o => o.id === currentCancelOrderId ? { ...o, status: 'Cancelled' } : o);
+                    
+                    if (cancelModal) cancelModal.classList.add('hidden');
+                    currentCancelOrderId = null;
+                    
+                    // Re-render theo tab hiện tại
+                    const activeTab = document.querySelector('.orders-nav .active');
+                    const activeStatus = activeTab ? activeTab.getAttribute('data-status') : 'all';
+                    renderOrders(activeStatus);
+                } else {
+                    showNotification(data.error || 'Không thể hủy đơn hàng', 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                showNotification('Đã xảy ra lỗi. Vui lòng thử lại sau.', 'error');
+            }
+        });
+    }
+
+    // Nút đóng modal
+    if (cancelCancelBtn) {
+        cancelCancelBtn.addEventListener('click', () => {
+            if (cancelModal) cancelModal.classList.add('hidden');
+            currentCancelOrderId = null;
+        });
+    }
+
+    // Gắn sự kiện click cho các tab
+    if (ordersNavLinks) {
+        ordersNavLinks.forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                ordersNavLinks.forEach(l => l.classList.remove('active'));
+                this.classList.add('active');
+                const status = this.getAttribute('data-status');
+                renderOrders(status);
+            });
+        });
+    }
+
+    // GỌI HÀM FETCH NGAY LÚC NÀY
+    fetchAndRenderOrders();
+});

@@ -1,0 +1,17 @@
+# File cấu hình bảo mật / API Key
+includes/config.local.php
+.env
+*.env
+
+# Nhật ký và file log
+*.log
+api/ai_support_log.txt
+
+# File tạm, hệ thống và IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Thư mục tải lên của người dùng (tùy chọn)
+assets/images/avatars/user_*.*
